@@ -267,7 +267,7 @@ def _construct_gct_serial(vertices: List[int], edge_trussness: Dict[Tuple[int, i
 ###############################################################################
 
 if __name__ == "__main__":
-    print("\n##### Loading the dataset… (加载数据集…)\n")
+    print("\n##### Loading the dataset…\n")
     try:
         edge_list = np.loadtxt("graph.txt", dtype=int)
     except OSError:
@@ -291,14 +291,14 @@ if __name__ == "__main__":
         except (OSError, ValueError):
             ground_truths.append(None)
 
-    print("\n##### Building GCT‑Index (accelerated)…\n")
+    print("\n##### Building GCT‑Index")
     gct = GCTIndex(parallel=True)
     if G.vertex_num > 0:
         t0 = time.time()
         gct.build_index(G)
         print(f"Total index build time: {time.time() - t0:.3f}s")
 
-        print("\n##### Test with GCT‑Index method… (测试GCT‑Index方法…)\n")
+        print("\n##### Test with GCT‑Index method…\n")
         gct_results: List[np.ndarray] = []
         t1 = time.time()
         for k_test in range(3, 7):
