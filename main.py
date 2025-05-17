@@ -1,6 +1,6 @@
 import os
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Dict, List, Set, Tuple, Optional
 
@@ -46,7 +46,7 @@ def check_result(prediction: np.ndarray, ground_truth: np.ndarray) -> bool:
 ###############################################################################
 
 class GCTIndex:
-    """Global‑Context‑Truss index (Algorithms 5‑6) with optional acceleration."""
+    """Global‑Context‑Truss index (Algorithms 5‑6) with optional acceleration."""
 
     def __init__(self, parallel: bool | int = False):
         if isinstance(parallel, bool):
@@ -54,6 +54,7 @@ class GCTIndex:
         else:
             self._n_jobs = max(1, parallel)
         self.index: Dict[int, Dict] = {}
+        self._score_cache = {}  # 缓存计算结果
 
     # ------------------------------------------------------------------
     def build_index(self, G: UndirectedGraph):
@@ -82,35 +83,57 @@ class GCTIndex:
 
     # ------------------------------------------------------------------
     def compute_score(self, v: int, k: int) -> int:
+        """计算节点v在k-truss约束下的连通分量数"""
+        # 1. 使用缓存避免重复计算
+        cache_key = (v, k)
+        if cache_key in self._score_cache:
+            return self._score_cache[cache_key]
+            
+        # 2. 获取索引数据
         idx = self.index.get(v)
-        if not idx:
+        if not idx or not idx["supernodes"]:
+            self._score_cache[cache_key] = 0
             return 0
-        rel_nodes: Set[int] = {sn for sn, d in idx["supernodes"].items() if d["trussness"] >= k}
-        if not rel_nodes:
+            
+        # 3. 筛选trussness >= k的超节点
+        valid_supernodes = {}
+        for sn, data in idx["supernodes"].items():
+            if data["trussness"] >= k:
+                valid_supernodes[sn] = data
+                
+        if not valid_supernodes:
+            self._score_cache[cache_key] = 0
             return 0
-        rel_edges = [(s, t) for s, t, tr in idx["superedges"] if tr >= k and s in rel_nodes and t in rel_nodes]
-        if not rel_edges:
-            return len(rel_nodes)
-        adj: Dict[int, Set[int]] = {n: set() for n in rel_nodes}
-        for s, t in rel_edges:
-            adj[s].add(t)
-            adj[t].add(s)
-        visited: Set[int] = set()
-        comps = 0
-        stack: List[int] = []
-        for n in rel_nodes:
-            if n in visited:
+            
+        # 4. 构建超节点间的邻接表（只保留trussness >= k的超边）
+        adj_list = defaultdict(list)
+        for s, t, tr in idx["superedges"]:
+            if tr >= k and s in valid_supernodes and t in valid_supernodes:
+                adj_list[s].append(t)
+                adj_list[t].append(s)
+                
+        # 5. 计算连通分量数
+        visited = set()
+        cc_count = 0
+        
+        for node in valid_supernodes:
+            if node in visited:
                 continue
-            comps += 1
-            stack.append(n)
-            visited.add(n)
-            while stack:
-                cur = stack.pop()
-                for nb in adj[cur]:
-                    if nb not in visited:
-                        visited.add(nb)
-                        stack.append(nb)
-        return comps
+                
+            cc_count += 1
+            queue = deque([node])
+            visited.add(node)
+            
+            while queue:
+                curr = queue.popleft()
+                for neighbor in adj_list[curr]:
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+        
+        # 6. 缓存并返回结果
+        self._score_cache[cache_key] = cc_count
+        return cc_count
 
 ###############################################################################
 # Helper: pure‑Python triangle enumeration (fallback)                         #
